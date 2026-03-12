@@ -7,6 +7,7 @@ import rollup_start_dev from './rollup_start_dev';
 import replace from '@rollup/plugin-replace';
 
 const production = !process.env.ROLLUP_WATCH;
+const publicUrl = production ? '/CNN-Visualizer' : '';
 
 export default {
 	input: 'src/main.js',
@@ -27,7 +28,10 @@ export default {
 			}
 		}),
 
-        replace({PUBLIC_URL: production ? '/cnn-explainer' : ''}),
+        replace({
+            preventAssignment: true,
+            PUBLIC_URL: publicUrl
+        }),
 
 		// If you have external dependencies installed from
 		// npm, you'll most likely need these plugins. In
