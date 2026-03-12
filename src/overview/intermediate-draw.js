@@ -337,7 +337,7 @@ const animationButtonClicked = (curLayerIndex) => {
 
     // Change button icon
     svg.select('.animation-control-button')
-      .attr('xlink:href', 'PUBLIC_URL/assets/img/fast_forward.svg');
+      .attr('xlink:href', 'assets/img/fast_forward.svg');
     
     isEndOfAnimation = false;
 
@@ -371,7 +371,7 @@ const animationButtonClicked = (curLayerIndex) => {
     
     // Change button icon
     svg.select('.animation-control-button')
-      .attr('xlink:href', 'PUBLIC_URL/assets/img/redo.svg');
+      .attr('xlink:href', 'assets/img/redo.svg');
     
     isEndOfAnimation = true;
   }
@@ -758,7 +758,7 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
     .on('click', () => animationButtonClicked(curLayerIndex))
     .append('image')
     .attr('class', 'animation-control-button')
-    .attr('xlink:href', 'PUBLIC_URL/assets/img/fast_forward.svg')
+    .attr('xlink:href', 'assets/img/fast_forward.svg')
     .attr('x', 50)
     .attr('y', 0)
     .attr('height', 13)
