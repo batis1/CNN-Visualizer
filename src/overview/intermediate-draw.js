@@ -412,7 +412,7 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
   // Add the intermediate layer
   let intermediateLayer = svg.append('g')
     .attr('class', 'intermediate-layer')
-    .style('opacity', 0);
+    .style('opacity', 1);
   
   // Recovert the animation counter
   isEndOfAnimation = false;
@@ -501,11 +501,18 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
   startOutputAnimation(kernelGroup, tickTime1D, stride, delay, curLayerIndex);
 
   // First intermediate layer
-  nodeCoordinate[curLayerIndex - 1].forEach((n, ni) => {
+  d.inputLinks.forEach((link, ni) => {
+    let sourceIndex = link.source.index;
+    let sourceNode = cnn[curLayerIndex - 1][sourceIndex];
+    let sourceCoords = nodeCoordinate[curLayerIndex - 1][sourceIndex];
+
+    if (sourceNode === undefined || sourceCoords === undefined || link.weight === null) {
+      return;
+    }
 
     // Compute the intermediate value
-    let inputMatrix = cnn[curLayerIndex - 1][ni].output;
-    let kernelMatrix = cnn[curLayerIndex][i].inputLinks[ni].weight;
+    let inputMatrix = sourceNode.output;
+    let kernelMatrix = link.weight;
     let interMatrix = singleConv(inputMatrix, kernelMatrix);
 
     // Compute the intermediate layer min max
@@ -516,7 +523,7 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
 
     // Layout the canvas and rect
     let newNode = createIntermediateNode(curLayerIndex, i, intermediateLayer,
-      intermediateX1, n.y, ni, stride, intermediateNodeMouseOverHandler,
+      intermediateX1, sourceCoords.y, ni, stride, intermediateNodeMouseOverHandler,
       intermediateNodeMouseLeaveHandler, intermediateNodeClicked, true);
     
     // Draw the image
@@ -526,14 +533,14 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
 
     // Edge: input -> intermediate1
     linkData.push({
-      source: getOutputKnot({x: leftX, y: n.y}),
-      target: getInputKnot({x: intermediateX1, y: n.y}),
+      source: getOutputKnot({x: leftX, y: sourceCoords.y}),
+      target: getInputKnot({x: intermediateX1, y: sourceCoords.y}),
       name: `input-${ni}-inter1-${ni}`
     });
 
     // Edge: intermediate1 -> intermediate2-1
     linkData.push({
-      source: getOutputKnot({x: intermediateX1, y: n.y}),
+      source: getOutputKnot({x: intermediateX1, y: sourceCoords.y}),
       target: getInputKnot({x: intermediateX2,
         y: nodeCoordinate[curLayerIndex][i].y}),
       name: `inter1-${ni}-inter2-1`
@@ -545,7 +552,7 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
     let kernelRectX = leftX - kernelRectLength * 3 * 2;
     let kernelGroup = intermediateLayer.append('g')
       .attr('class', `kernel kernel-${ni}`)
-      .attr('transform', `translate(${kernelRectX}, ${n.y})`);
+      .attr('transform', `translate(${kernelRectX}, ${sourceCoords.y})`);
 
     let weightText = 'Kernel weights: [';
     let f2 = d3.format('.2f');
@@ -599,10 +606,10 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
       .selectAll('rect.kernel')
       .style('opacity', 0.7);
 
-    kernelGroupInput.attr('transform', `translate(${leftX}, ${n.y})`)
+    kernelGroupInput.attr('transform', `translate(${leftX}, ${sourceCoords.y})`)
       .attr('data-tick', 0)
       .attr('data-origin-x', leftX)
-      .attr('data-origin-y', n.y);
+      .attr('data-origin-y', sourceCoords.y);
 
     let kernelGroupResult = kernelGroup.clone(true)
       .style('pointer-events', 'none')
@@ -615,9 +622,9 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
       .style('fill', 'none');
 
     kernelGroupResult.attr('transform',
-      `translate(${intermediateX1}, ${n.y})`)
+      `translate(${intermediateX1}, ${sourceCoords.y})`)
       .attr('data-origin-x', intermediateX1)
-      .attr('data-origin-y', n.y);
+      .attr('data-origin-y', sourceCoords.y);
     
     startIntermediateAnimation(kernelGroupInput, kernelGroupResult, tickTime1D,
       stride);
@@ -795,8 +802,7 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
     .y(d => d.y);
   
   let edgeGroup = intermediateLayer.append('g')
-    .attr('class', 'edge-group')
-    .lower();
+    .attr('class', 'edge-group');
   
   let dashoffset = 0;
 
@@ -809,10 +815,11 @@ const drawIntermediateLayer = (curLayerIndex, leftX, rightX, rightStart,
     .attr('d', d => linkGen({source: d.source, target: d.target}))
     .style('fill', 'none')
     .style('stroke-width', 1)
+    .style('opacity', 0.75)
     .style('stroke', intermediateColor);
 
   edgeGroup.select('#edge-output-next')
-    .style('opacity', 0.1);
+    .style('opacity', 0.35);
   
   edgeGroup.selectAll('path.flow-edge')
     .attr('stroke-dasharray', '4 2')
@@ -1260,7 +1267,7 @@ export const drawConv1 = (curLayerIndex, d, i, width, height,
   // Add annotation to the intermediate layer
   let intermediateLayerAnnotation = svg.append('g')
   .attr('class', 'intermediate-layer-annotation')
-  .style('opacity', 0);
+  .style('opacity', 1);
 
   drawIntermediateLayerAnnotation({
     leftX: leftX,
@@ -1270,6 +1277,9 @@ export const drawConv1 = (curLayerIndex, d, i, width, height,
     isFirstConv: true,
     i: i
   });
+
+  intermediateLayer.raise();
+  intermediateLayerAnnotation.raise();
 
   let range = cnnLayerRanges.local[curLayerIndex];
 
@@ -1314,10 +1324,6 @@ export const drawConv1 = (curLayerIndex, d, i, width, height,
 
   // Show everything
   svg.selectAll('g.intermediate-layer, g.intermediate-layer-annotation')
-    .transition()
-    .delay(500)
-    .duration(500)
-    .ease(d3.easeCubicInOut)
     .style('opacity', 1);
 }
 
@@ -1405,7 +1411,7 @@ export const drawConv2 = (curLayerIndex, d, i, width, height,
   // Add annotation to the intermediate layer
   let intermediateLayerAnnotation = svg.append('g')
     .attr('class', 'intermediate-layer-annotation')
-    .style('opacity', 0);
+    .style('opacity', 1);
 
   drawIntermediateLayerAnnotation({
     leftX: leftX,
@@ -1414,6 +1420,9 @@ export const drawConv2 = (curLayerIndex, d, i, width, height,
     intermediateGap: intermediateGap,
     i: i
   });
+
+  intermediateLayer.raise();
+  intermediateLayerAnnotation.raise();
 
   drawIntermediateLayerLegend({
     legendHeight: 5,
@@ -1444,10 +1453,6 @@ export const drawConv2 = (curLayerIndex, d, i, width, height,
 
   // Show everything
   svg.selectAll('g.intermediate-layer, g.intermediate-layer-annotation')
-    .transition()
-    .delay(500)
-    .duration(500)
-    .ease(d3.easeCubicInOut)
     .style('opacity', 1);
 }
 
@@ -1541,7 +1546,7 @@ export const drawConv3 = (curLayerIndex, d, i, width, height,
   // Add annotation to the intermediate layer
   let intermediateLayerAnnotation = svg.append('g')
     .attr('class', 'intermediate-layer-annotation')
-    .style('opacity', 0);
+    .style('opacity', 1);
 
   drawIntermediateLayerAnnotation({
     leftX: leftX,
@@ -1550,6 +1555,9 @@ export const drawConv3 = (curLayerIndex, d, i, width, height,
     intermediateGap: intermediateGap,
     i: i
   });
+
+  intermediateLayer.raise();
+  intermediateLayerAnnotation.raise();
 
   drawIntermediateLayerLegend({
     legendHeight: 5,
@@ -1580,10 +1588,6 @@ export const drawConv3 = (curLayerIndex, d, i, width, height,
 
   // Show everything
   svg.selectAll('g.intermediate-layer, g.intermediate-layer-annotation')
-    .transition()
-    .delay(500)
-    .duration(500)
-    .ease(d3.easeCubicInOut)
     .style('opacity', 1);
 }
 
@@ -1675,7 +1679,7 @@ export const drawConv4 = (curLayerIndex, d, i, width, height,
   // Add annotation to the intermediate layer
   let intermediateLayerAnnotation = svg.append('g')
     .attr('class', 'intermediate-layer-annotation')
-    .style('opacity', 0);
+    .style('opacity', 1);
 
   drawIntermediateLayerAnnotation({
     leftX: leftX,
@@ -1684,6 +1688,9 @@ export const drawConv4 = (curLayerIndex, d, i, width, height,
     intermediateGap: intermediateGap,
     i: i
   });
+
+  intermediateLayer.raise();
+  intermediateLayerAnnotation.raise();
 
   drawIntermediateLayerLegend({
     legendHeight: 5,
@@ -1714,9 +1721,5 @@ export const drawConv4 = (curLayerIndex, d, i, width, height,
 
   // Show everything
   svg.selectAll('g.intermediate-layer, g.intermediate-layer-annotation')
-    .transition()
-    .delay(500)
-    .duration(500)
-    .ease(d3.easeCubicInOut)
     .style('opacity', 1);
 }

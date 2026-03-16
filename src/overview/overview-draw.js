@@ -21,6 +21,25 @@ const svgPaddings = overviewConfig.svgPaddings;
 const gapRatio = overviewConfig.gapRatio;
 const classLists = overviewConfig.classLists;
 const formater = d3.format('.4f');
+const edgeRevealDuration = 900;
+const edgeRevealLayerDelay = 550;
+const edgeRevealStagger = 18;
+const packetTravelDuration = 1400;
+const packetLayerOffset = 120;
+const packetRadius = 2.8;
+const nodePulseDuration = 240;
+const nodePulseSettleDuration = 260;
+const winnerLabelDelayOffset = 180;
+const winnerLabelDuration = 380;
+const packetColors = {
+  green: '#BDE4B2',
+  pink: '#F472B6',
+  violet: '#A855F7',
+  amber: '#F59E0B',
+  cyan: '#22C7F0',
+  coral: '#FB7185',
+  lightPurple: '#E9D5FF'
+};
 
 // Shared variables
 let svg = undefined;
@@ -395,6 +414,446 @@ const drawLegends = (legends, legendHeight) => {
 }
 
 /**
+ * Match the packet colors from the slide animation across the network depth.
+ * @param {number} targetLayerIndex
+ */
+const getPacketColor = (targetLayerIndex) => {
+  if (targetLayerIndex === 1) {
+    return packetColors.green;
+  }
+
+  if (targetLayerIndex <= 3) {
+    return packetColors.pink;
+  }
+
+  if (targetLayerIndex <= 5) {
+    return packetColors.violet;
+  }
+
+  if (targetLayerIndex <= 7) {
+    return packetColors.amber;
+  }
+
+  if (targetLayerIndex <= 9) {
+    return packetColors.cyan;
+  }
+
+  if (targetLayerIndex <= 10) {
+    return packetColors.coral;
+  }
+
+  return packetColors.lightPurple;
+}
+
+/**
+ * D3 in this project is older and does not provide d3.maxIndex.
+ * Find the winning output index manually.
+ * @param {[object]} outputLayer
+ */
+const getWinningOutputIndex = (outputLayer) => {
+  let maxIndex = 0;
+  let maxValue = -Infinity;
+
+  outputLayer.forEach((node, index) => {
+    if (node.output > maxValue) {
+      maxValue = node.output;
+      maxIndex = index;
+    }
+  });
+
+  return maxIndex;
+}
+
+const drawStageGroups = (cnnGroup, height) => {
+  let existing = cnnGroup.select('g.stage-grouping');
+  if (!existing.empty()) {
+    existing.remove();
+  }
+
+  let stageGroup = cnnGroup.insert('g', ':first-child')
+    .attr('class', 'stage-grouping')
+    .style('pointer-events', 'none');
+
+  let stages = [
+    {
+      start: 1,
+      end: 5,
+      fill: '#F8FAFC',
+      stroke: '#E2E8F0',
+    },
+    {
+      start: 6,
+      end: 10,
+      fill: '#F1F5F9',
+      stroke: '#CBD5E1',
+    }
+  ];
+
+  stages.forEach((stage) => {
+    let x = nodeCoordinate[stage.start][0].x - 28;
+    let endX = nodeCoordinate[stage.end][0].x + nodeLength + 28;
+    let y = svgPaddings.top - 22;
+    let boxHeight = height - svgPaddings.top - svgPaddings.bottom + 82;
+
+    let group = stageGroup.append('g')
+      .attr('class', 'stage-group');
+
+    group.append('rect')
+      .attr('x', x)
+      .attr('y', y)
+      .attr('width', endX - x)
+      .attr('height', boxHeight)
+      .attr('rx', 24)
+      .attr('ry', 24)
+      .style('fill', stage.fill)
+      .style('stroke', stage.stroke)
+      .style('stroke-width', 1.5)
+      .style('opacity', 0.65);
+
+  });
+}
+
+
+/**
+ * Reveal edges progressively from earlier layers to later layers.
+ * This keeps the overview calmer and matches the slide-style flow animation.
+ * @param {object} edgeSelection D3 selection of path.edge elements
+ */
+const animateEdgeReveal = (edgeSelection) => {
+  edgeSelection
+    .sort((a, b) => {
+      if (a.targetLayerIndex !== b.targetLayerIndex) {
+        return a.targetLayerIndex - b.targetLayerIndex;
+      }
+      if (a.targetNodeIndex !== b.targetNodeIndex) {
+        return a.targetNodeIndex - b.targetNodeIndex;
+      }
+      return a.sourceNodeIndex - b.sourceNodeIndex;
+    })
+    .each(function(d) {
+      let path = d3.select(this);
+      let totalLength = this.getTotalLength();
+      let intraLayerDelay =
+        (d.targetNodeIndex * 4 + d.sourceNodeIndex) * edgeRevealStagger;
+
+      path
+        .style('opacity', 0)
+        .style('stroke-dasharray', `${totalLength} ${totalLength}`)
+        .style('stroke-dashoffset', totalLength)
+        .transition('edge-reveal')
+        .delay((d.targetLayerIndex - 1) * edgeRevealLayerDelay + intraLayerDelay)
+        .duration(edgeRevealDuration)
+        .ease(d3.easeLinear)
+        .style('opacity', edgeOpacity)
+        .style('stroke-dashoffset', 0)
+        .on('end', function() {
+          d3.select(this)
+            .style('stroke-dasharray', null)
+            .style('stroke-dashoffset', null);
+        });
+    });
+}
+
+/**
+ * Animate small packets along the revealed edges.
+ * @param {object} packetSelection D3 selection of circle elements
+ */
+const animateEdgePackets = (packetSelection) => {
+  packetSelection.each(function(d) {
+    let circle = d3.select(this);
+    let path = d.path;
+    let totalLength = path.getTotalLength();
+    let intraLayerDelay =
+      (d.targetNodeIndex * 4 + d.sourceNodeIndex) * edgeRevealStagger;
+    let revealDelay =
+      (d.targetLayerIndex - 1) * edgeRevealLayerDelay + intraLayerDelay;
+    let packetDelay = revealDelay + packetLayerOffset;
+
+    circle
+      .style('opacity', 0)
+      .transition('packet-fade-in')
+      .delay(packetDelay)
+      .duration(120)
+      .style('opacity', 1)
+      .transition('packet-travel')
+      .duration(packetTravelDuration)
+      .ease(d3.easeLinear)
+      .attrTween('transform', () => (t) => {
+        let point = path.getPointAtLength(t * totalLength);
+        return `translate(${point.x}, ${point.y})`;
+      })
+      .transition('packet-fade-out')
+      .duration(180)
+      .style('opacity', 0)
+      .remove();
+  });
+}
+
+/**
+ * Pulse destination nodes when packets arrive.
+ * @param {object} cnnGroup D3 group containing the network
+ * @param {[object]} edgeData Edge metadata with path timing fields
+ */
+const animateNodeArrivalPulses = (cnnGroup, edgeData) => {
+  let nodePulseData = [];
+  let pulseLookup = {};
+
+  edgeData.forEach((edge) => {
+    let key = `${edge.targetLayerIndex}-${edge.targetNodeIndex}`;
+    let arrivalDelay = edge.packetDelay + packetTravelDuration;
+
+    if (!pulseLookup[key] || arrivalDelay < pulseLookup[key].delay) {
+      let layerNode = cnn[edge.targetLayerIndex][edge.targetNodeIndex];
+      let nodePoint = nodeCoordinate[edge.targetLayerIndex][edge.targetNodeIndex];
+      let isOutput = layerNode.layerName === 'output';
+
+      pulseLookup[key] = {
+        key: key,
+        delay: arrivalDelay,
+        x: nodePoint.x,
+        y: nodePoint.y,
+        width: isOutput ? nodeLength + 88 : nodeLength + 8,
+        height: isOutput ? nodeLength + 10 : nodeLength + 8,
+        radius: isOutput ? 7 : 4,
+        color: getPacketColor(edge.targetLayerIndex)
+      };
+    }
+  });
+
+  Object.keys(pulseLookup).forEach((key) => {
+    nodePulseData.push(pulseLookup[key]);
+  });
+
+  nodePulseData.sort((a, b) => a.delay - b.delay);
+
+  cnnGroup.select('g.node-pulse-group').remove();
+
+  let pulseGroup = cnnGroup.append('g')
+    .attr('class', 'node-pulse-group')
+    .style('pointer-events', 'none');
+
+  let pulses = pulseGroup.selectAll('rect.node-pulse')
+    .data(nodePulseData)
+    .enter()
+    .append('rect')
+    .attr('class', 'node-pulse')
+    .attr('x', (d) => d.x - 4)
+    .attr('y', (d) => d.y - 4)
+    .attr('rx', (d) => d.radius)
+    .attr('ry', (d) => d.radius)
+    .attr('width', (d) => d.width)
+    .attr('height', (d) => d.height)
+    .style('fill', (d) => d.color)
+    .style('opacity', 0);
+
+  pulses.each(function(d) {
+    d3.select(this)
+      .transition('node-pulse-in')
+      .delay(d.delay)
+      .duration(nodePulseDuration)
+      .ease(d3.easeCubicOut)
+      .style('opacity', 0.22)
+      .attr('x', d.x - 6)
+      .attr('y', d.y - 6)
+      .attr('width', d.width + 4)
+      .attr('height', d.height + 4)
+      .transition('node-pulse-out')
+      .duration(nodePulseSettleDuration)
+      .ease(d3.easeCubicOut)
+      .style('opacity', 0)
+      .attr('x', d.x - 8)
+      .attr('y', d.y - 8)
+      .attr('width', d.width + 8)
+      .attr('height', d.height + 8)
+      .remove();
+  });
+}
+
+/**
+ * Highlight the predicted output label after the packet flow reaches output.
+ */
+const animateWinningOutputLabel = () => {
+  let outputLayer = cnn[cnn.length - 1];
+  let winningIndex = getWinningOutputIndex(outputLayer);
+  let outputLayerRevealDelay =
+    (cnn.length - 2) * edgeRevealLayerDelay;
+  let winnerDelay =
+    outputLayerRevealDelay + winnerLabelDelayOffset;
+  let winnerCoords = nodeCoordinate[cnn.length - 1][winningIndex];
+
+  let allLabels = svg.selectAll('text.output-text');
+  let winnerLabel = svg.select(`#layer-${cnn.length - 1}-node-${winningIndex}`)
+    .select('text.output-text');
+  let winnerBar = svg.select(`#layer-${cnn.length - 1}-node-${winningIndex}`)
+    .select('rect.output-rect');
+  let winnerGroup = svg.select(`#layer-${cnn.length - 1}-node-${winningIndex}`);
+
+  svg.selectAll('g.node-output')
+    .interrupt('winner-node')
+    .interrupt('winner-node-settle')
+    .attr('transform', null);
+
+  allLabels.interrupt('winner-reset');
+  winnerLabel.interrupt('winner-highlight');
+  winnerBar.interrupt('winner-bar');
+  winnerGroup.interrupt('winner-node');
+
+  allLabels
+    .transition('winner-reset')
+    .duration(250)
+    .style('fill', 'black')
+    .style('opacity', 0.58)
+    .style('font-size', '11px')
+    .style('font-weight', '400')
+    .style('text-decoration', 'none');
+
+  svg.selectAll('rect.output-rect')
+    .transition('winner-bar-reset')
+    .duration(200)
+    .style('fill', '#9AA4B2')
+    .style('opacity', 0.72)
+    .attr('height', nodeLength / 4)
+    .attr('y', (d, i) => nodeCoordinate[cnn.length - 1][i].y + nodeLength / 2 + 8);
+
+  svg.selectAll('g.output-winner-overlay').remove();
+
+  let overlay = svg.append('g')
+    .attr('class', 'output-winner-overlay')
+    .style('pointer-events', 'none')
+    .style('opacity', 0);
+
+  overlay.append('rect')
+    .attr('x', winnerCoords.x - 8)
+    .attr('y', winnerCoords.y - 5)
+    .attr('rx', 6)
+    .attr('ry', 6)
+    .attr('width', nodeLength + 92)
+    .attr('height', nodeLength + 10)
+    .style('fill', packetColors.lightPurple)
+    .style('stroke', packetColors.purple)
+    .style('stroke-width', 1.5);
+
+  overlay.append('text')
+    .attr('x', winnerCoords.x)
+    .attr('y', winnerCoords.y + nodeLength / 2)
+    .style('dominant-baseline', 'middle')
+    .style('font-size', '18px')
+    .style('font-weight', '900')
+    .style('fill', packetColors.purple)
+    .text(classLists[winningIndex]);
+
+  winnerLabel
+    .transition('winner-highlight')
+    .delay(winnerDelay)
+    .duration(220)
+    .ease(d3.easeCubicOut)
+    .style('fill', packetColors.purple)
+    .style('opacity', 1)
+    .style('font-size', '16px')
+    .style('font-weight', '800')
+    .style('text-decoration', 'underline')
+    .transition('winner-settle')
+    .duration(180)
+    .ease(d3.easeCubicOut)
+    .style('font-size', '15px');
+
+  winnerBar
+    .transition('winner-bar')
+    .delay(winnerDelay - 40)
+    .duration(220)
+    .ease(d3.easeCubicOut)
+    .style('fill', packetColors.purple)
+    .style('opacity', 1)
+    .attr('height', nodeLength / 2.8)
+    .attr('y', nodeCoordinate[cnn.length - 1][winningIndex].y + nodeLength / 2 + 6)
+    .transition('winner-bar-settle')
+    .duration(260)
+    .ease(d3.easeCubicInOut)
+    .attr('height', nodeLength / 3.5)
+    .attr('y', nodeCoordinate[cnn.length - 1][winningIndex].y + nodeLength / 2 + 7);
+
+  winnerGroup
+    .transition('winner-node')
+    .delay(winnerDelay - 20)
+    .duration(180)
+    .ease(d3.easeBackOut.overshoot(1.4))
+    .attr('transform', 'translate(10, 0)')
+    .transition('winner-node-settle')
+    .duration(220)
+    .ease(d3.easeCubicOut)
+    .attr('transform', 'translate(6, 0)');
+
+  winnerGroup.select('text.output-rank')
+    .transition('winner-rank')
+    .delay(winnerDelay - 40)
+    .duration(220)
+    .style('fill', packetColors.violet)
+    .style('opacity', 1);
+
+  overlay
+    .transition('winner-overlay')
+    .delay(winnerDelay - 10)
+    .duration(winnerLabelDuration)
+    .ease(d3.easeCubicOut)
+    .style('opacity', 0.96)
+    .transition('winner-overlay-settle')
+    .duration(260)
+    .style('opacity', 0.82);
+
+}
+
+/**
+ * Replay the overview edge reveal and packet flow.
+ * Used on first draw and when the selected input image changes.
+ * @param {object} cnnGroup D3 group containing the network
+ */
+const replayEdgeAnimations = (cnnGroup) => {
+  let edges = cnnGroup.select('g.edge-group').selectAll('path.edge');
+  let edgeAnimationData = edges.data().map((d, i) => {
+    let intraLayerDelay =
+      (d.targetNodeIndex * 4 + d.sourceNodeIndex) * edgeRevealStagger;
+    let revealDelay =
+      (d.targetLayerIndex - 1) * edgeRevealLayerDelay + intraLayerDelay;
+
+    return {
+      ...d,
+      path: edges.nodes()[i],
+      revealDelay: revealDelay,
+      packetDelay: revealDelay + packetLayerOffset
+    };
+  });
+
+  edges.interrupt('edge-reveal');
+  edges
+    .style('opacity', edgeOpacity)
+    .style('stroke-dasharray', null)
+    .style('stroke-dashoffset', null);
+
+  animateEdgeReveal(edges);
+
+  cnnGroup.select('g.edge-packet-group').remove();
+
+  let packetGroup = cnnGroup.append('g')
+    .attr('class', 'edge-packet-group')
+    .style('pointer-events', 'none');
+
+  let packets = packetGroup.selectAll('circle.edge-packet')
+    .data(edgeAnimationData)
+    .enter()
+    .append('circle')
+    .attr('class', 'edge-packet')
+    .attr('r', packetRadius)
+    .attr('transform', (d) => `translate(${d.source.x}, ${d.source.y})`)
+    .style('fill', (d) => getPacketColor(d.targetLayerIndex))
+    .style('stroke', 'none')
+    .style('opacity', 0);
+
+  animateEdgePackets(packets);
+  animateNodeArrivalPulses(cnnGroup, edgeAnimationData);
+  animateWinningOutputLabel();
+}
+
+/**
  * Draw the overview
  * @param {number} width Width of the cnn group
  * @param {number} height Height of the cnn group
@@ -498,7 +957,7 @@ export const drawCNN = (width, height, cnnGroup, nodeMouseOverHandler,
         .attr('y', (d, i) => nodeCoordinate[l][i].y + nodeLength / 2 + 8)
         .attr('height', nodeLength / 4)
         .attr('width', 0)
-        .style('fill', 'gray');
+        .style('fill', '#9AA4B2');
       nodeGroups.append('text')
         .attr('class', 'output-text')
         .attr('x', left)
@@ -540,6 +999,8 @@ export const drawCNN = (width, height, cnnGroup, nodeMouseOverHandler,
   svg.selectAll('g.node-output').each(
     (d, i, g) => drawOutputScore(d, i, g, outputRectScale)
   );
+
+  drawStageGroups(cnnGroup, height);
 
   // Add layer label
   let layerNames = cnn.map(d => {
@@ -662,7 +1123,7 @@ export const drawCNN = (width, height, cnnGroup, nodeMouseOverHandler,
   let edgeGroup = cnnGroup.append('g')
     .attr('class', 'edge-group');
   
-  edgeGroup.selectAll('path.edge')
+  let edges = edgeGroup.selectAll('path.edge')
     .data(linkData)
     .enter()
     .append('path')
@@ -675,6 +1136,8 @@ export const drawCNN = (width, height, cnnGroup, nodeMouseOverHandler,
     .style('stroke-width', edgeStrokeWidth)
     .style('opacity', edgeOpacity)
     .style('stroke', edgeInitColor);
+
+  replayEdgeAnimations(cnnGroup);
 
   // Add input channel annotations
   let inputAnnotation = cnnGroup.append('g')
@@ -826,6 +1289,8 @@ export const updateCNN = () => {
     .tickValues([0, cnnLayerRanges.output[1]]);
   
   svg.select('g#output-legend').select('g').call(outputLegendAxis);
+
+  replayEdgeAnimations(svg.select('g.cnn-group'));
 }
 
 /**

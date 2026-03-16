@@ -25,9 +25,7 @@ export function generateOutputMappings(stride, output, kernelLength, padded_inpu
 }
 
 export function compute_input_multiplies_with_weight(hoverH, hoverW, 
-                                              padded_input_size, weight_dims, outputMappings, kernelLength) {
-  
-  const [h_weight, w_weight] = weight_dims;
+                                              padded_input_size, outputMappings, kernelLength) {
   const input_multiplies_with_weight = array1d(padded_input_size * padded_input_size);
   for (let h_weight = 0; h_weight < kernelLength; h_weight++) {
     for (let w_weight = 0; w_weight < kernelLength; w_weight++) {
